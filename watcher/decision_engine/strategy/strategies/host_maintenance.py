@@ -20,6 +20,7 @@
 from oslo_log import log
 from watcher._i18n import _
 from watcher.common import exception
+from watcher.common import nova_helper
 from watcher.decision_engine.model import element
 from watcher.decision_engine.strategy.strategies import base
 
@@ -248,8 +249,13 @@ class HostMaintenance(base.HostMaintenanceBaseStrategy):
                 self.add_action_maintain_compute_node(maintenance_node)
                 self.host_migration(maintenance_node, node)
                 return True
-
         return False
+
+    def stop_instances(self, maintenance_node):
+        self.add_action_maintain_compute_node(maintenance_node)
+        instances = self.compute_model.get_node_instances(maintenance_node)
+        for instance in instances:
+            nova_helper.stop_instance(instance.uuid)
 
     def try_maintain(self, maintenance_node):
         """try to maintain one compute node
@@ -271,6 +277,7 @@ class HostMaintenance(base.HostMaintenanceBaseStrategy):
 
         maintenance_node = self.input_parameters.get('maintenance_node')
         backup_node = self.input_parameters.get('backup_node')
+        stop_instances = self.input_parameters.get('stop_instances', False)
 
         # if no VMs in the maintenance_node, just maintain the compute node
         src_node = self.compute_model.get_node_by_name(maintenance_node)
@@ -280,13 +287,16 @@ class HostMaintenance(base.HostMaintenanceBaseStrategy):
                 self.add_action_maintain_compute_node(src_node)
                 return
 
-        if backup_node:
-            des_node = self.compute_model.get_node_by_name(backup_node)
+        if stop_instances:
+            self.stop_instances(src_node)
         else:
-            des_node = None
+            if backup_node:
+                des_node = self.compute_model.get_node_by_name(backup_node)
+            else:
+                des_node = None
 
-        if not self.safe_maintain(src_node, des_node):
-            self.try_maintain(src_node)
+            if not self.safe_maintain(src_node, des_node):
+                self.try_maintain(src_node)
 
     def post_execute(self):
         """Post-execution phase
